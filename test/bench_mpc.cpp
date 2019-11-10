@@ -12,6 +12,8 @@ void bench_once(NetIOMP<nP> * ios[2], ThreadPool * pool, string filename) {
 	//string file = circuit_file_location+"/"+filename;
 	CircuitFile cf(filename.c_str());
 
+	auto big_start = clock_start();
+
 	auto start = clock_start();
 	CMPC<nP>* mpc = new CMPC<nP>(ios, pool, party, &cf);
 	ios[0]->flush();
@@ -46,8 +48,13 @@ void bench_once(NetIOMP<nP> * ios[2], ThreadPool * pool, string filename) {
 //	if(party == 1)cout <<"bandwidth\t"<<party<<"\t"<<band2<<endl;
 	if(party == 1)cout <<"ONLINE:\t"<<party<<"\t"<<t2<<" \n"<<flush;
 	delete mpc;
+
+	double t_big = time_from(big_start);
+
+	if(party == 1) cout << "TOTAL:\t"<<party<<"\t"<<t_big<<" \n"<<flush;
 }
 int main(int argc, char** argv) {
+//	int func = 0;
 	parse_party_and_port(argv, &party, &port);
 	if(party > nP)return 0;
 	NetIOMP<nP> io(party, port);
@@ -59,6 +66,20 @@ int main(int argc, char** argv) {
 	NetIOMP<nP> *ios[2] = {&io, &io2};
 	ThreadPool pool(2*(nP-1)+2);	
 
-	bench_once(ios, &pool, circuit_file_location+"sha-1.txt");
+//	for(int i = 0; i < 10; ++i)	
+//	if(func == 0)	
+//	bench_once(ios, &pool, circuit_file_location+"AES-non-expanded.txt");
+//	for(int i = 0; i < 10; ++i)
+//	if(func == 1)	
+//	bench_once(ios, &pool, circuit_file_location+"sha-1.txt");
+//	for(int i = 0; i < 10; ++i)
+//	if(func == 2)	
+//	bench_once(ios, &pool, circuit_file_location+"sha-256.txt");
+//	
+//	bench_once(ios, &pool, "/home/wangxiao/git/emp-toolkit/constantmpc/circ.txt");
+
+	bench_once(ios, &pool, "/home/ubuntu/cmp-1000.txt");
+//	bench_once(ios, &pool, circuit_file_location+"mult-100.txt");
+
 	return 0;
 }

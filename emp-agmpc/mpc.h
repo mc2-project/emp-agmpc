@@ -3,6 +3,7 @@
 #include "fpremp.h"
 #include "abitmp.h"
 #include "netmp.h"
+#include <assert.h>
 #include <emp-tool/emp-tool.h>
 using namespace emp;
 
@@ -53,9 +54,12 @@ class CMPC { public:
 			if (cf->gates[4*i+3] == AND_GATE)
 				++num_ands;
 		}
+
+		printf("num of AND gates = %d, num of any gates = %d\n", num_ands, cf->num_gate);
+
 		num_in = cf->n1+cf->n2;
-		total_pre = num_in + num_ands + 3*ssp;
-		fpre = new FpreMP<nP>(io, pool, party, ssp);
+		total_pre = num_in + num_ands;
+		fpre = new FpreMP<nP>(io, pool, party, 0);
 		Delta = fpre->Delta;
 
 		if(party == 1) {
@@ -111,36 +115,36 @@ class CMPC { public:
 
 	void function_independent() {
 		if(party != 1)
-			prg.random_block(labels, cf->num_wire);
+			prg.random_block(labels, total_pre);
 
+		//printf("before fpre->compute.\n");
 		fpre->compute(ANDS_mac, ANDS_key, ANDS_value, num_ands);
+		//printf("after fpre->compute.\n");
 
 		prg.random_bool(preprocess_value, total_pre);
+		//printf("before abit->compute.\n");
 		fpre->abit->compute(preprocess_mac, preprocess_key, preprocess_value, total_pre);
-		auto ret = fpre->abit->check(preprocess_mac, preprocess_key, preprocess_value, total_pre);
-ret.get();
-
+		//printf("after abit->compute.\n");
 		for(int i = 1; i <= nP; ++i) {
 			memcpy(key[i], preprocess_key[i], num_in * sizeof(block));
 			memcpy(mac[i], preprocess_mac[i], num_in * sizeof(block));
 		}
 		memcpy(value, preprocess_value, num_in * sizeof(bool));
-#ifdef __debug
-		check_MAC<nP>(io, ANDS_mac, ANDS_key, ANDS_value, Delta, num_ands*3, party);
-		check_correctness<nP>(io, ANDS_value, num_ands, party);
-#endif
-//		ret.get();
 	}
 
 	void function_dependent() {
 		int ands = num_in;
 		bool * x[nP+1];
 		bool * y[nP+1];
+
+		//printf("creating x, y\n");
 		for(int i = 1; i <= nP; ++i) {
 			x[i] = new bool[num_ands];
 			y[i] = new bool[num_ands];
 		}
 
+
+		//printf("assigning key and mac.\n");
 		for(int i = 0; i < cf->num_gate; ++i) {
 			if (cf->gates[4*i+3] == AND_GATE) {
 				for(int j = 1; j <= nP; ++j) {
@@ -152,6 +156,7 @@ ret.get();
 			}
 		}
 
+		//printf("computing gates.\n");
 		for(int i = 0; i < cf->num_gate; ++i) {
 			if (cf->gates[4*i+3] == XOR_GATE) {
 				for(int j = 1; j <= nP; ++j) {
@@ -172,10 +177,7 @@ ret.get();
 			}
 		}
 
-#ifdef __debug
-		check_MAC<nP>(io, mac, key, value, Delta, cf->num_wire, party);
-#endif
-
+		//printf("using ANDS_value.\n");
 		ands = 0;
 		for(int i = 0; i < cf->num_gate; ++i) {
 			if (cf->gates[4*i+3] == AND_GATE) {
@@ -185,16 +187,22 @@ ret.get();
 			}
 		}
 
+		//printf("sending out the ANDS masks.\n");
 		vector<future<void>>	 res;
 		for(int i = 1; i <= nP; ++i) for(int j = 1; j <= nP; ++j) if( (i < j) and (i == party or j == party) ) {
 			int party2 = i + j - party;
 			res.push_back(pool->enqueue([this, x, y, party2]() {
+		//		printf("prepare to send x to %d.\n", party2);
 				io->send_data(party2, x[party], num_ands);
+		//		printf("prepare to send y to %d.\n", party2);
 				io->send_data(party2, y[party], num_ands);
+		//		printf("flushing the connection to %d\n", party2);
 				io->flush(party2);
 			}));
 			res.push_back(pool->enqueue([this, x, y, party2]() {
+		//		printf("waiting to receive x from %d\n", party2);
 				io->recv_data(party2, x[party2], num_ands);
+		//		printf("waiting to receive y from %d\n", party2); 
 				io->recv_data(party2, y[party2], num_ands);
 			}));
 		}
@@ -204,6 +212,7 @@ ret.get();
 			y[1][j] = y[1][j] != y[i][j];
 		}
 
+		//printf("compute sigma\n");
 		ands = 0;
 		for(int i = 0; i < cf->num_gate; ++i) {
 			if (cf->gates[4*i+3] == AND_GATE) {
@@ -236,18 +245,9 @@ ret.get();
 				ands++;
 			}
 		}//sigma_[] stores the and of input wires to each AND gates
-#ifdef __debug_
-		check_MAC<nP>(io, sigma_mac, sigma_key, sigma_value, Delta, num_ands, party);
-		ands = 0;
-		for(int i = 0; i < cf->num_gate; ++i) {
-			if (cf->gates[4*i+3] == AND_GATE) {
-				bool tmp[] = { value[cf->gates[4*i]], value[cf->gates[4*i+1]], sigma_value[ands]};
-				check_correctness(io, tmp, 1, party);
-				ands++;
-			}
-		}
-#endif
+		
 
+	//	printf("building the circuit\n");
 		ands = 0;
 		block H[4][nP+1];
 		block K[4][nP+1], M[4][nP+1];
@@ -286,14 +286,17 @@ ret.get();
 					io->send_data(1, H[j]+1, sizeof(block)*(nP));
 				++ands;
 			}
+	//		printf("finishing sending my circuit to party 1\n");
 			io->flush(1);
 		} else {
 			for(int i = 2; i <= nP; ++i) {
 				int party2 = i;
 				res.push_back(pool->enqueue([this, party2]() {
-					for(int i = 0; i < num_ands; ++i)
+		//			printf("prepare to receive circuit from %d\n", party2);
+					for(int i = 0; i < num_ands; ++i){
 						for(int j = 0; j < 4; ++j)
 							io->recv_data(party2, GT[i][party2][j]+1, sizeof(block)*(nP));
+					}
 				}));
 			}
 			for(int i = 0; i < cf->num_gate; ++i) if(cf->gates[4*i+3] == AND_GATE) {
@@ -319,6 +322,7 @@ ret.get();
 				memcpy(GTv[ands], r, sizeof(bool)*4);
 				++ands;
 			}
+	//		printf("done receiving all the circuits\n");
 			joinNclean(res);
 		}
 		for(int i = 1; i <= nP; ++i) {
@@ -328,6 +332,8 @@ ret.get();
 	}
 
 	void online (bool * input, bool * output) {
+		printf("1\n");
+
 		bool * mask_input = new bool[cf->num_wire];
 		for(int i = 0; i < num_in; ++i)
 			mask_input[i] = input[i] != value[i];
@@ -359,6 +365,8 @@ ret.get();
 			joinNclean(res);
 			for(int i = 2; i <= nP; ++i) delete[] tmp[i];
 		}
+
+		printf("2\n");
 	
 		if(party!= 1) {
 			for(int i = 0; i < num_in; ++i) {
@@ -402,6 +410,7 @@ ret.get();
 						else if(block_cmp(&H[1], &t0, 1))
 							mask_input[cf->gates[4*i+2]] = mask_input[cf->gates[4*i+2]] != true;
 						else 	{cout <<ands <<"no match GT!"<<endl<<flush;
+                          exit(EXIT_FAILURE);
 						}
 					}
 					ands++;
@@ -412,6 +421,10 @@ ret.get();
 				}
 			}
 		}
+
+
+		printf("3\n");
+
 		if(party != 1) {
 			io->send_data(1, value+cf->num_wire - cf->n3, cf->n3);
 			io->flush(1);
@@ -436,6 +449,8 @@ ret.get();
 			for(int i = 2; i <= nP; ++i) delete[] tmp[i];
 			memcpy(output, mask_input + cf->num_wire - cf->n3, cf->n3);
 		}
+
+		printf("4\n");
 		delete[] mask_input;
 	}
 	void Hash(block H[4][nP+1], const block & a, const block & b, uint64_t idx) {
@@ -481,26 +496,19 @@ ret.get();
 		for(int i = 1; i <= nP; ++i) for(int j = 1; j<= nP; ++j) if( (i < j) and (i == party or j == party) ) {
 			int party2 = i + j - party;
 			res.push_back(pool->enqueue([this, start, end, mask_input, party2]() {
-				char dig[Hash::DIGEST_SIZE];
 				io->send_data(party2, value+start[party2], end[party2]-start[party2]);
-				emp::Hash::hash_once(dig, mac[party2]+start[party2], (end[party2]-start[party2])*sizeof(block));
-				io->send_data(party2, dig, Hash::DIGEST_SIZE);
 				io->flush(party2);
 				return false;
 			}));
 			res.push_back(pool->enqueue([this, start, end, input_mask, party2]() {
-				char dig[Hash::DIGEST_SIZE];
-				char dig2[Hash::DIGEST_SIZE];
 				io->recv_data(party2, input_mask[party2], end[party]-start[party]);
 				block * tmp = new block[end[party]-start[party]];
 				for(int i =  0; i < end[party] - start[party]; ++i) {
 					tmp[i] = key[party2][i+start[party]];
 					if(input_mask[party2][i])tmp[i] = xorBlocks(tmp[i], Delta);
 				}
-				emp::Hash::hash_once(dig2, tmp, (end[party]-start[party])*sizeof(block));
-				io->recv_data(party2, dig, Hash::DIGEST_SIZE);
 				delete[] tmp;
-				return strncmp(dig, dig2, Hash::DIGEST_SIZE) != 0;	
+				return false;
 			}));
 		}
 		if(joinNcleanCheat(res)) error("cheat!");
@@ -575,6 +583,7 @@ ret.get();
 						else if(block_cmp(&H[1], &t0, 1))
 							mask_input[cf->gates[4*i+2]] = mask_input[cf->gates[4*i+2]] != true;
 						else 	{cout <<ands <<"no match GT!"<<endl<<flush;
+                          exit(EXIT_FAILURE);
 						}
 					}
 					ands++;
