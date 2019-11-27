@@ -7,7 +7,7 @@
 #include <emp-tool/emp-tool.h>
 #include "emp-agmpc/emp-agmpc.h"
 
-int silence_for_benchmark = 1;
+int silence_for_benchmark = 0;
 
 const static int num_parties = NUM_PARTY_FOR_RUNNING;
 // This function parses the circuit input file to determine
@@ -121,17 +121,25 @@ void bench_once(NetIOMP<num_parties> * ios[2], ThreadPool * pool,
     std::cout << "Writing to output file" << output_file << std::endl;
     fstream outfile;
     outfile.open(output_file.c_str(), std::ios::out);
-    uint8_t v;
-    for (int i = 0; i < cf.n3; i += 8) {
-      for (int j = 0; j < 8; j++) {
+    int32_t num_outputs = cf.n3;
+    outfile.write((char*)&num_outputs, 4);
+    uint8_t v = 0;
+    int i;
+    for (i = 0; i < cf.n3; i += 8) {
+      for (int j = 0; j < 8 && i + j < cf.n3; j++) {
         if (out[i + j]) {
           v |= (1 << j);
         }
       }
+      //printf("v %d\n", v);
       outfile.write((char *) &v, 1);
       v = 0;
     }
     outfile.close();
+  }
+  cout << "Outputting data in decimal" << endl;
+  for (int i = 0; i< cf.n3; i+=64) {
+    cout << bool_to64(out + i) << endl;
   }
   
   delete mpc;

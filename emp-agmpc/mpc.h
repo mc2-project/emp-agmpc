@@ -37,6 +37,10 @@ class CMPC { public:
 	ThreadPool * pool;
 	block Delta;
 		
+	// Added by Ryan
+	vector<std::pair<int, bool>> clear_value_indices;
+
+
 	block (*GTM)[4][nP+1];
 	block (*GTK)[4][nP+1];
 	bool (*GTv)[4];
@@ -49,10 +53,23 @@ class CMPC { public:
 		this->cf = cf;
 		this->ssp = ssp;
 		this->pool = pool;
+		clear_value_indices = {};
 
+		int start = -1;
 		for(int i = 0; i < cf->num_gate; ++i) {
 			if (cf->gates[4*i+3] == AND_GATE)
 				++num_ands;
+			// Added later by Ryan to keep track of clear-valued wires.
+			if (cf->gates[4*i] == 0 && cf->gates[4*i+1] == 0 && cf->gates[4*i+3] == XOR_GATE) {
+				start = cf->gates[4*i+2];
+			}
+			if (cf->gates[4*i] == -1 && start != -1) {
+				std::pair<int, bool> clear_value;
+				clear_value.first = cf->gates[4*i+2] - start - 1;
+				clear_value.second = cf->gates[4*i+1];
+				cout << "Found a clear-indexed wire at " << cf->gates[4*i+2] << " with value " << cf->gates[4*i+1] << endl;
+				clear_value_indices.push_back(clear_value);
+			}
 		}
 
 		printf("num of AND gates = %d, num of any gates = %d\n", num_ands, cf->num_gate);
@@ -409,7 +426,9 @@ class CMPC { public:
 							mask_input[cf->gates[4*i+2]] = mask_input[cf->gates[4*i+2]] != false;
 						else if(block_cmp(&H[1], &t0, 1))
 							mask_input[cf->gates[4*i+2]] = mask_input[cf->gates[4*i+2]] != true;
-						else 	{cout <<ands <<"no match GT!"<<endl<<flush;
+						else 	{
+							cout <<cf->gates[4*i] << " " << cf->gates[4*i+1] << " " << cf->gates[4*i+2] << " " << cf->gates[4*i+3] << " " << endl<<flush;
+							cout <<ands <<"no match GT!"<<endl<<flush;
                           exit(EXIT_FAILURE);
 						}
 					}
@@ -448,6 +467,16 @@ class CMPC { public:
 
 			for(int i = 2; i <= nP; ++i) delete[] tmp[i];
 			memcpy(output, mask_input + cf->num_wire - cf->n3, cf->n3);
+			
+			for (int i = 0; i < cf->n3; i++) {
+				for (const auto& e : clear_value_indices) {
+					if (e.first == i) {
+						cout << "Here! at index " << i << " old val: " <<  output[i] << " new val: " << e.second << endl;
+						output[i] = e.second;
+					}
+				}
+			}
+			
 		}
 
 		printf("4\n");
@@ -582,7 +611,9 @@ class CMPC { public:
 							mask_input[cf->gates[4*i+2]] = mask_input[cf->gates[4*i+2]] != false;
 						else if(block_cmp(&H[1], &t0, 1))
 							mask_input[cf->gates[4*i+2]] = mask_input[cf->gates[4*i+2]] != true;
-						else 	{cout <<ands <<"no match GT!"<<endl<<flush;
+						else 	{
+							cout <<cf->gates[4*i] << cf->gates[4*i+1] << cf->gates[4*i+2] << cf->gates[4*i+3] << endl<<flush;
+							cout <<ands <<"no match GT!"<<endl<<flush;
                           exit(EXIT_FAILURE);
 						}
 					}
