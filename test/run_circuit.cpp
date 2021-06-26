@@ -122,7 +122,7 @@ void bench_once(NetIOMP<num_parties> * ios[2], ThreadPool * pool,
     fstream outfile;
     outfile.open(output_file.c_str(), std::ios::out);
     int32_t num_outputs = cf.n3;
-    outfile.write((char*)&num_outputs, 4);
+    // outfile.write((char*)&num_outputs, 4);
     uint8_t v = 0;
     int i;
     for (i = 0; i < cf.n3; i += 8) {
